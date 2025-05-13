@@ -1,0 +1,52 @@
+from flask import Flask, request, jsonify
+import pymysql
+import pymongo
+import uuid
+
+app = Flask(__name__)
+
+# 初始化 MySQL 連線
+# mysql_conn = pymysql.connect(
+#     host="localhost",
+#     user="root",
+#     password="yourpassword",
+#     database="epoxy",
+#     autocommit=False
+# )
+
+# 初始化 MongoDB 連線
+# mongo_client = pymongo.MongoClient("mongodb://localhost:27017/")
+# mongo_db = mongo_client["epoxy"]
+# inventory_col = mongo_db["inventory"]
+# log_col = mongo_db["transactions_log"]
+
+# 暫存交易 session
+transactions = {}
+
+def write_log(txn_id, data):
+    # log_col.update_one()
+    pass
+
+@app.route("/begin", methods=["POST"])
+def begin():
+    return jsonify({})
+
+@app.route("/prepare", methods=["POST"])
+def prepare():
+    return jsonify({})
+
+@app.route("/commit", methods=["POST"])
+def commit():
+    return jsonify({})
+
+@app.route("/rollback", methods=["POST"])
+def rollback():
+    return jsonify({})
+
+@app.route("/logs", methods=["GET"])
+def get_logs():
+    return jsonify()
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
