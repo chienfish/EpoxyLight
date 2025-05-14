@@ -1,0 +1,66 @@
+.bar {
+  background-color: #CCCCF2;
+  color: black;
+  padding: 11px 25px 2px 25px;
+}
+
+.bar-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: relative;
+}
+
+.bar-logo {
+  text-decoration: none;
+  color: inherit;
+  font-size: 24px;
+}
+
+.bar-links {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+.bar-links a {
+  color: black;
+  text-decoration: none;
+  font-size: 22px;
+}
+
+.bar-links a:hover {
+  color: #8080CC;
+}
+
+.hamburger {
+  display: none;
+  color: black;
+  flex-direction: column;
+  justify-content: space-around;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+
+@media (max-width: 640px) {
+  .bar-links {
+    display: none;
+    flex-direction: column;
+    position: absolute;
+    top: 55px;
+    right: 0px;
+    background-color: white;
+    padding: 10px;
+    z-index: 10;
+    width: 100%;
+  }
+
+  .bar-links.open {
+    display: flex;
+  }
+
+  .hamburger {
+    display: flex;
+  }
+}

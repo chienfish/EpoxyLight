@@ -2,6 +2,7 @@
 
 ## Documents
 HackMD: https://hackmd.io/@6ZrLntymSnGyQ6g_vpxtuw/BJvIsebZgx 
+Figma: https://www.figma.com/design/0tL1Mnn6e3LShg20h2Gdof/EpoxyLight?node-id=0-1&t=MrNeagLOSFUJNlly-1 
 
 ---
 
