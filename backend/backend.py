@@ -47,6 +47,14 @@ def rollback():
 def get_logs():
     return jsonify()
 
+@app.route("/items", methods=["GET"]) # 要取create page的商品
+def get_items():
+    # items = inventory_col.distinct("item")
+    # return jsonify({"items": items})
+    return jsonify({
+        "items": ["apple", "banana", "coffee", "milk"]
+    })
+
 
 if __name__ == "__main__":
     app.run(debug=True)
