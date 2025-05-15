@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import pymysql
 import pymongo
 import uuid
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -55,6 +56,35 @@ def get_items():
         "items": ["apple", "banana", "coffee", "milk"]
     })
 
+@app.route("/transactions", methods=["GET"])
+def get_transactions():
+    return jsonify({
+        "transactions": [
+            {
+                "id": "TXN001",
+                "status": "ready",
+                "start_time": "2025/05/15 15:30"
+            }
+        ]
+    })
+
+@app.route("/status/<txn_id>", methods=["GET"])
+def get_transaction_detail(txn_id):
+    return jsonify({
+        "id": txn_id,
+        "status": "ready",
+        "start_time": "2025/05/15 15:30",
+        "mysql_status": "ok",
+        "mongo_status": "ok",
+        "order_data": {
+            "user": "testuser",
+            "amount": 120
+        },
+        "inventory_data": {
+            "item": "apple",
+            "count": -1
+        }
+    })
 
 if __name__ == "__main__":
     app.run(debug=True)

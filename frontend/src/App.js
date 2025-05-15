@@ -3,6 +3,7 @@ import Home from "./pages/Home"
 import NotFound from "./pages/NotFound"
 import CreatePage from "./pages/CreatePage"
 import StatusPage from "./pages/StatusPage"
+import StatusDetailPage from "./pages/StatusDetailPage"
 import HistoryPage from "./pages/HistoryPage"
 
 
@@ -26,6 +27,12 @@ function App() {
           path="/status"
           element={
               <StatusPage />
+          }
+        />
+        <Route
+          path="/status/:id"
+          element={
+              <StatusDetailPage />
           }
         />
         <Route
