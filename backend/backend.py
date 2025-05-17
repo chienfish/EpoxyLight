@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 
 app = Flask(__name__)
-
+yourpassword = "Aa5849593mm"  # 請替換為你的 MySQL 密碼
 # 初始化 MySQL 連線
 # mysql_conn = pymysql.connect(
 #     host="localhost",
@@ -20,7 +20,7 @@ def create_database_if_not_exists():
     connection = pymysql.connect(
         host="127.0.0.1",
         user="root",
-        password="yourpassword",
+        password=yourpassword,
         autocommit=True
     )
     with connection.cursor() as cursor:
@@ -33,7 +33,7 @@ create_database_if_not_exists()  # 確保資料庫存在
 mysql_conn = pymysql.connect(
     host="127.0.0.1",
     user="root",
-    password="yourpassword",
+    password=yourpassword,
     database="epoxy",
     autocommit=False
 )
@@ -144,7 +144,9 @@ def prepare():
                 "phase": "prepare",
                 "mysql": "ok",
                 "mongodb": "ok",
-                "status": "ready"
+                "status": "ready",
+                "order_data": order_data,
+                "inventory_data": inventory_data
             }}
         )
 
@@ -183,11 +185,101 @@ def prepare():
 
 @app.route("/commit", methods=["POST"])
 def commit():
-    return jsonify({})
+    data = request.json
+    txn_id = data.get("transaction_id")
+
+    # 查詢 log 取得 mongo session 狀態（假設 session 需要保留）
+    log_entry = log_col.find_one({"transaction_id": txn_id})
+    if not log_entry or log_entry.get("status") != "ready":
+        return jsonify({"error": "Transaction not ready or not found"}), 400
+
+    try:
+        # 1. Commit MySQL
+        mysql_conn.commit()
+
+        # 2. Commit MongoDB
+        mongo_session = mongo_client.start_session()
+        mongo_session.start_transaction()
+        mongo_session.commit_transaction()
+
+        # 3. 更新 log 狀態
+        log_col.update_one(
+            {"transaction_id": txn_id},
+            {"$set": {
+                "phase": "commit",
+                "status": "success"
+            }}
+        )
+
+        return jsonify({"transaction_id": txn_id, "status": "success"})
+
+    except Exception as e:
+        # 有任何問題就回滾
+        mysql_conn.rollback()
+        mongo_session.abort_transaction()
+
+        log_col.update_one(
+            {"transaction_id": txn_id},
+            {"$set": {
+                "phase": "commit",
+                "status": "commit_failed",
+                "error": str(e)
+            }}
+        )
+
+        return jsonify({"transaction_id": txn_id, "status": "commit_failed", "error": str(e)}), 500
+
+    finally:
+        if 'mongo_session' in locals():
+            mongo_session.end_session()
+
 
 @app.route("/rollback", methods=["POST"])
 def rollback():
-    return jsonify({})
+    data = request.json
+    txn_id = data.get("transaction_id")
+
+    log_entry = log_col.find_one({"transaction_id": txn_id})
+    if not log_entry:
+        return jsonify({"error": "Transaction not found"}), 404
+
+    try:
+        # 1. 回滾 MySQL 訂單（根據 txn_id 刪除）
+        with mysql_conn.cursor() as cursor:
+            cursor.execute("DELETE FROM orders WHERE transaction_id = %s", (txn_id,))
+        mysql_conn.commit()
+
+        # 2. 回滾 MongoDB 庫存（加回來）← 可根據 log 中紀錄補回
+        if "inventory_data" in log_entry:
+            item = log_entry["inventory_data"]["item"]
+            count = log_entry["inventory_data"]["count"]
+            inventory_col.update_one(
+                {"item": item},
+                {"$inc": {"stock": -count}}  # 將扣掉的加回去
+            )
+
+        # 3. 更新 log 狀態
+        log_col.update_one(
+            {"transaction_id": txn_id},
+            {"$set": {
+                "phase": "rollback",
+                "status": "cancelled"
+            }}
+        )
+
+        return jsonify({"transaction_id": txn_id, "status": "cancelled"})
+
+    except Exception as e:
+        log_col.update_one(
+            {"transaction_id": txn_id},
+            {"$set": {
+                "phase": "rollback",
+                "status": "rollback_failed",
+                "error": str(e)
+            }}
+        )
+        return jsonify({"transaction_id": txn_id, "status": "rollback_failed", "error": str(e)}), 500
+
 
 @app.route("/logs", methods=["GET"])
 def get_logs():
