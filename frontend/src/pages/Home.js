@@ -9,7 +9,7 @@ import Mem4 from "../assets/4.jpg";
 const teamMembers = [
   {
     name: "林芊妤",
-    role: "Frontend & QA",
+    role: "Frontend",
     image: Mem2,
   },
   {
@@ -24,7 +24,7 @@ const teamMembers = [
   },
   {
     name: "許博睿",
-    role: "Frontend & Reporter",
+    role: "Quality Assurance",
     image: Mem4,
   },
 ];

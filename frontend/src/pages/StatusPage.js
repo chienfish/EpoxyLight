@@ -8,9 +8,9 @@ function StatusPage() {
     const navigate = useNavigate();
 
     useEffect(() => {
-        fetch("/transactions") // 從後端取得進行中交易列表
+        fetch("/logs?type=status")
             .then(res => res.json())
-            .then(data => setTransactions(data.transactions || []));
+            .then(data => setTransactions(data || []));
     }, []);
 
     const handleCommit = async (txnId) => {
@@ -19,7 +19,7 @@ function StatusPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ transaction_id: txnId }),
         });
-        window.location.reload(); // 重新載入狀態
+        window.location.reload();
     };
 
     const handleRollback = async (txnId) => {
@@ -41,8 +41,8 @@ function StatusPage() {
             <h2>進行中交易</h2>
             <div className="transaction-grid">
                 {transactions.map(txn => (
-                    <div className="transaction-card" key={txn.id}>
-                        <h3>ID: {txn.id}</h3>
+                    <div className="transaction-card" key={txn.transaction_id}>
+                        <h3>ID: {txn.transaction_id}</h3>
                         <table>
                             <tbody>
                                 <tr>
@@ -51,19 +51,19 @@ function StatusPage() {
                                 </tr>
                                 <tr>
                                     <td>開始時間</td>
-                                    <td>{txn.start_time}</td>
+                                    <td>{txn.created_at?.replace("T", " ")}</td>
                                 </tr>
                                 <tr>
                                     <td>詳情</td>
-                                    <td><button onClick={() => handleDetail(txn.id)}>🔍</button></td>
+                                    <td><button onClick={() => handleDetail(txn.transaction_id)}>🔍</button></td>
                                 </tr>
                                 <tr>
                                     <td>送出 commit</td>
-                                    <td><button onClick={() => handleCommit(txn.id)}>✅</button></td>
+                                    <td><button onClick={() => handleCommit(txn.transaction_id)}>✅</button></td>
                                 </tr>
                                 <tr>
                                     <td>手動 rollback</td>
-                                    <td><button onClick={() => handleRollback(txn.id)}>🔁</button></td>
+                                    <td><button onClick={() => handleRollback(txn.transaction_id)}>🔁</button></td>
                                 </tr>
                             </tbody>
                         </table>

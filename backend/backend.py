@@ -70,6 +70,76 @@ inventory_col.insert_many([
 # 暫存交易 session
 transactions = {}
 
+# 假資料 logs
+fake_logs = [
+    {
+        "transaction_id": "TXN20240513001",
+        "status": "success",
+        "created_at": "2024-05-13T14:01:22",
+        "order_data": {
+            "user": "chienfish",
+            "amount": 120
+        },
+        "inventory_data": {
+            "item": "apple",
+            "count": -2
+        },
+        "mysql": "ok",
+        "mongodb": "ok"
+    },
+    {
+        "transaction_id": "TXN20240513002",
+        "status": "cancelled",
+        "created_at": "2024-05-13T14:05:00",
+        "order_data": {
+            "user": "amy",
+            "amount": 80
+        },
+        "inventory_data": {
+            "item": "banana",
+            "count": -3
+        },
+        "mysql": "ok",
+        "mongodb": "fail: stock not enough"
+    },
+    {
+        "transaction_id": "TXN20240513003",
+        "status": "ready",
+        "created_at": "2024-05-13T14:10:00",
+        "order_data": {
+            "user": "bob",
+            "amount": 50
+        },
+        "inventory_data": {
+            "item": "milk",
+            "count": -1
+        },
+        "mysql": "ok",
+        "mongodb": "ok"
+    },
+    {
+        "transaction_id": "TXN20240513004",
+        "status": "pending",
+        "created_at": "2024-05-13T14:20:00",
+        "order_data": {
+            "user": "aaron",
+            "amount": 55
+        },
+        "inventory_data": {
+            "item": "coffee",
+            "count": -1
+        },
+        "mysql": "fail",
+        "mongodb": "ok"
+    }
+]
+
+# 狀態分類
+STATUS_MAPPING = {
+    "status": ["pending", "ready"],
+    "history": ["success", "cancelled", "abort"]
+}
+
 def write_log(txn_id, data):
     # log_col.update_one()
     pass
@@ -283,7 +353,12 @@ def rollback():
 
 @app.route("/logs", methods=["GET"])
 def get_logs():
-    return jsonify()
+    log_type = request.args.get("type")
+    if log_type in STATUS_MAPPING:
+        filtered_logs = [log for log in fake_logs if log["status"] in STATUS_MAPPING[log_type]]
+    else:
+        filtered_logs = fake_logs
+    return jsonify(filtered_logs)
 
 @app.route("/items", methods=["GET"]) # 要取create page的商品
 def get_items():
@@ -307,20 +382,18 @@ def get_transactions():
 
 @app.route("/status/<txn_id>", methods=["GET"])
 def get_transaction_detail(txn_id):
+    found = next((log for log in fake_logs if log["transaction_id"] == txn_id), None)
+    if not found:
+        return jsonify({"error": "Not found"}), 404
+
     return jsonify({
-        "id": txn_id,
-        "status": "ready",
-        "start_time": "2025/05/15 15:30",
-        "mysql_status": "ok",
-        "mongo_status": "ok",
-        "order_data": {
-            "user": "testuser",
-            "amount": 120
-        },
-        "inventory_data": {
-            "item": "apple",
-            "count": -1
-        }
+        "id": found["transaction_id"],
+        "status": found["status"],
+        "start_time": found["created_at"].replace("T", " "),
+        "mysql_status": found.get("mysql", "ok"),
+        "mongo_status": found.get("mongodb", "ok"),
+        "order_data": found["order_data"],
+        "inventory_data": found["inventory_data"]
     })
 
 if __name__ == "__main__":
