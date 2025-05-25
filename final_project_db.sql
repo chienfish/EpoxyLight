@@ -33,4 +33,4 @@ INSERT INTO orders_staging (user_id, product_id, amount, transaction_id) VALUES
 (1006, 'p001', 1, 'tx999');  -- 準備再買一台 iPad Pro
 
 /* drop database */
-DROP DATABASE DB_order;
+-- DROP DATABASE DB_order;
