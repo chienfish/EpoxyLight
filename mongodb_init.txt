@@ -1,0 +1,31 @@
+// 切換到 shopdb 資料庫，若不存在會自動建立
+use shopdb;
+
+// 清除舊的集合（可選）
+db.products.drop();
+db.products_staging.drop();
+
+// 正式商品資料
+db.products.insertMany([
+  { _id: "p001", name: "iPad Pro", stock: 48 }, // 原本 50，已被訂單扣掉 2（1 + 1 staging）
+  { _id: "p002", name: "MacBook Air", stock: 48 },  // 原本 50，已扣 2
+  { _id: "p003", name: "Apple Watch", stock: 49 },  // 原本 50，已扣 1
+  { _id: "p004", name: "iPhone 15", stock: 47 },    // 原本 50，已扣 3
+  { _id: "p005", name: "AirPods Pro", stock: 49 }   // 原本 50，已扣 1
+]);
+
+// 暫存交易資料（模擬進行中交易）
+db.products_staging.insertMany([
+  {
+    _id: "p001",
+    name: "iPad Pro",
+    stock: 47,  // 原本 48，又預備再扣 1
+    transaction_id: "tx999"
+  },
+  {
+    _id: "p002",
+    name: "MacBook Air",
+    stock: 47,  // 原本 48，又預備再扣 1
+    transaction_id: "tx999"
+  }
+]);
