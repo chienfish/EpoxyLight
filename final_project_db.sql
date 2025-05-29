@@ -1,36 +1,32 @@
-/* create and use database */
-CREATE DATABASE DB_order;
+CREATE DATABASE IF NOT EXISTS DB_order;
 USE DB_order;
 
--- 正式訂單表
-CREATE TABLE orders (
+-- 正式訂單資料表
+CREATE TABLE IF NOT EXISTS orders (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
     product_id VARCHAR(20) NOT NULL,
     amount INT NOT NULL,
+    price INT NOT NULL,
     create_at DATETIME NOT NULL
 );
 
--- 暫存訂單表（模擬交易中）
-CREATE TABLE orders_staging (
+-- 暫存訂單資料表
+CREATE TABLE IF NOT EXISTS orders_staging (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
+    transaction_id VARCHAR(50) NOT NULL,
     product_id VARCHAR(20) NOT NULL,
-    amount INT NOT NULL,
-    transaction_id VARCHAR(50) NOT NULL
+    amount INT NOT NULL
 );
 
 -- 插入 5 筆正式訂單資料
-INSERT INTO orders (user_id, product_id, amount, create_at) VALUES
-(1001, 'p001', 1, NOW()),   -- iPad Pro
-(1002, 'p002', 2, NOW()),   -- MacBook Air
-(1003, 'p003', 1, NOW()),   -- Apple Watch
-(1004, 'p004', 3, NOW()),   -- iPhone 15
-(1005, 'p005', 1, NOW());   -- AirPods Pro
+INSERT INTO orders (product_id, amount, price, create_at) VALUES
+('p001', 1, 20000, NOW()),   -- iPad Pro
+('p002', 2, 80000, NOW()),   -- MacBook Air
+('p003', 1, 10000, NOW()),   -- Apple Watch
+('p004', 3, 90000, NOW()),   -- iPhone 15
+('p005', 1, 5000, NOW());   -- AirPods Pro
 
--- 插入 1 筆 staging 訂單（模擬交易中）
-INSERT INTO orders_staging (user_id, product_id, amount, transaction_id) VALUES
-(1006, 'p001', 1, 'tx999');  -- 準備再買一台 iPad Pro
-
-/* drop database */
--- DROP DATABASE DB_order;
+-- 模擬一筆交易中的 staging 訂單
+INSERT INTO orders_staging (transaction_id, product_id, amount) VALUES
+('tx999', 'p001', 1),
+('tx999', 'p002', 1);

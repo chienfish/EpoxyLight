@@ -4,28 +4,29 @@ use shopdb;
 // 清除舊的集合（可選）
 db.products.drop();
 db.products_staging.drop();
+db.transaction_log.drop();
 
 // 正式商品資料
 db.products.insertMany([
-  { _id: "p001", name: "iPad Pro", stock: 48 }, // 原本 50，已被訂單扣掉 2（1 + 1 staging）
-  { _id: "p002", name: "MacBook Air", stock: 48 },  // 原本 50，已扣 2
-  { _id: "p003", name: "Apple Watch", stock: 49 },  // 原本 50，已扣 1
-  { _id: "p004", name: "iPhone 15", stock: 47 },    // 原本 50，已扣 3
-  { _id: "p005", name: "AirPods Pro", stock: 49 }   // 原本 50，已扣 1
+  { _id: "p001", name: "iPad Pro", stock: 48, price: 20000 }, // 原本 50，已被訂單扣掉 2（1 + 1 staging）
+  { _id: "p002", name: "MacBook Air", stock: 48, price: 40000 },  // 原本 50，已扣 2
+  { _id: "p003", name: "Apple Watch", stock: 49, price: 10000 },  // 原本 50，已扣 1
+  { _id: "p004", name: "iPhone 15", stock: 47, price: 30000 },    // 原本 50，已扣 3
+  { _id: "p005", name: "AirPods Pro", stock: 49, price: 5000 }   // 原本 50，已扣 1
 ]);
 
-// 暫存交易資料（模擬進行中交易）
+// 模擬交易中的暫存資料（delta_stock 表示預計異動的數量）
 db.products_staging.insertMany([
-  {
-    _id: "p001",
-    name: "iPad Pro",
-    stock: 47,  // 原本 48，又預備再扣 1
-    transaction_id: "tx999"
-  },
-  {
-    _id: "p002",
-    name: "MacBook Air",
-    stock: 47,  // 原本 48，又預備再扣 1
-    transaction_id: "tx999"
-  }
+  { transaction_id: "tx999", product_id: "p001", delta_stock: -1 },
+  { transaction_id: "tx999", product_id: "p002", delta_stock: -1 }
 ]);
+
+// 交易紀錄 log
+db.transaction_log.insertOne({
+  transaction_id: "tx999",
+  phase: "begin",
+  status: "pending",
+  start_time: new Date(),
+  mysql: "",
+  mongodb: ""
+});
