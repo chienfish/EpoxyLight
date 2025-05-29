@@ -5,82 +5,28 @@ from pymongo import UpdateOne
 import uuid
 from datetime import datetime
 
+# mysql 資料匯入: mysql -u root -p < final_project_db.sql
+# mongo 資料匯入: mongo < mongodb_init.txt
+
+# mongo 連線 / 初始化
 app = Flask(__name__)
 yourpassword = "yourpassword"  # 請替換為你的 MySQL 密碼
 sql_dbname = "DB_order"
-
-def init_mysql_schema():
-    # 連線時不指定資料庫，方便建立 DB
-    connection = pymysql.connect(
-        host="127.0.0.1",
-        user="root",
-        password=yourpassword,
-        autocommit=True
-    )
-    with connection.cursor() as cursor:
-        # 建立資料庫 + 切換
-        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {sql_dbname};")
-        cursor.execute(f"USE {sql_dbname};")
-
-        # 建立正式 orders 表
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS orders (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                user_id INT NOT NULL,
-                product_id VARCHAR(20) NOT NULL,
-                amount INT NOT NULL,
-                create_at DATETIME NOT NULL
-            );
-        """)
-
-        # 建立暫存 products_staging 表
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS products_staging (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                user_id INT NOT NULL,
-                product_id VARCHAR(20) NOT NULL,
-                amount INT NOT NULL,
-                transaction_id VARCHAR(50) NOT NULL
-            );
-        """)
-    connection.close()
-
-init_mysql_schema()
-
-# 重新連線進 DB_order，做後續操作
-mysql_conn = pymysql.connect(
-    host="127.0.0.1",
-    user="root",
-    password=yourpassword,
-    database="DB_order",
-    autocommit=False
-)
-
-
-# 初始化 MongoDB 連線
 mongo_client = pymongo.MongoClient("mongodb://localhost:27017/")
 mongo_db = mongo_client["shopdb"]
 inventory_col = mongo_db["products"]
 log_col = mongo_db["transactions_log"]
 inventory_staging_col = mongo_db["products_staging"]
 
-# 還需要MongoDB資料
-inventory_col.delete_many({})
-inventory_staging_col.delete_many({})
-mongo_data=[
-  { "_id": "p001", "name": "iPad Pro", "stock": 50}, 
-  { "_id": "p002", "name": "MacBook Air", "stock": 50 }, 
-  { "_id": "p003", "name": "Apple Watch", "stock": 50 }, 
-  { "_id": "p004", "name": "iPhone 15", "stock": 50 },   
-  { "_id": "p005", "name": "AirPods Pro", "stock": 50 } ,
-]
-
-operations = [
-    UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True)
-    for doc in mongo_data
-]
-
-inventory_col.bulk_write(operations)
+# mysql 連線
+mysql_conn = pymysql.connect(
+    host="127.0.0.1",
+    user="root",
+    port=3307,
+    password=yourpassword,
+    database="DB_order",
+    autocommit=False
+)
 
 # 暫存交易 session
 transactions = {}
@@ -94,7 +40,6 @@ STATUS_MAPPING = {
 @app.route("/begin", methods=["POST"])
 def begin():
     txn_id = f"TXN{uuid.uuid4().hex}" 
-    # txn_id = f"TXN{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex}" 
     now = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
 
     log = {
@@ -109,79 +54,68 @@ def begin():
 
     return jsonify({"transaction_id": txn_id, "status": "pending"})
     
-@app.route("/prepare", methods=["POST"])
+@app.route('/prepare', methods=['POST'])
 def prepare():
-    data = request.json #網頁過來的資料
-    txn_id = data.get("transaction_id")
-    order_data = data.get("order_data")
+    data = request.get_json()
+    txn_id = data['transaction_id']
+    products = data['products']
+    mongo_ok = True
 
-    mysql_success = False
-    mongo_success = False
+    for item in products:
+        product = inventory_col.find_one({"_id": item['product_id']})
+        if not product:
+            mongo_ok = False
+            break
+
+        if product['stock'] >= item['amount']:
+            # 實際減少 products 庫存
+            inventory_col.update_one(
+                {"_id": item['product_id']},
+                {"$inc": {"stock": -item['amount']}}
+            )
+            # 寫入 products_staging
+            inventory_staging_col.insert_one({
+                "transaction_id": txn_id,
+                "product_id": item['product_id'],
+                "delta_stock": -item['amount']
+            })
+        else:
+            mongo_ok = False
+            break
+
+    if mongo_ok:
+        log_col.update_one(
+            {"transaction_id": txn_id},
+            {"$set": {"mongodb": "ok"}}
+        )
+    else:
+        log_col.update_one(
+            {"transaction_id": txn_id},
+            {"$set": {"mongodb": "fail"}}
+        )
+        return jsonify({"message": "MongoDB prepare failed"}), 400
 
     try:
-        # --- MySQL 寫入 ---
-        # 寫在 products_staging 表
-        mysql_conn.begin()
-        for order in order_data:
-            with mysql_conn.cursor() as cursor:
-                sql = """
-                    INSERT INTO products_staging (user_id, product_id, amount, transaction_id)
-                    VALUES (%s, %s, %s, %s)
-                """
-                cursor.execute(sql, (
-                    order["user_id"],
-                    order["product_id"],
-                    order["amount"],
-                    txn_id
-                ))
-        mysql_success = True
+        cursor = mysql_conn.cursor()
+        for item in products:
+            cursor.execute(
+                "INSERT INTO orders_staging (transaction_id, product_id, amount) VALUES (%s, %s, %s)",
+                (txn_id, item['product_id'], item['amount'])
+            )
+        mysql_conn.commit()
+        cursor.close()
 
-        # MongoDB 寫入
-        for inv in order_data:
-            product = inventory_col.find_one({"_id": inv["product_id"]})
-            if not product or product["stock"] < inv["amount"]:
-                raise Exception(f"Insufficient stock for product {inv['product_id']}")
-
-            inventory_staging_col.insert_one({
-                "_id": f"{inv['product_id']}_{txn_id}",  # composite key
-                "product_id": inv["product_id"],
-                "name": product["name"],
-                "stock": product["stock"] - inv["amount"],
-                "transaction_id": txn_id
-            })
-        mongo_success = True
-
-        # --- 寫 log ---
         log_col.update_one(
             {"transaction_id": txn_id},
-            {"$set": {
-                "phase": "prepare",
-                "mysql": "ok",
-                "mongodb": "ok",
-                "status": "ready",
-                "order_data": order_data
-            }}
+            {"$set": {"mysql": "ok"}}
         )
-
-        return jsonify({"transaction_id": txn_id, "status": "ready"})
-
+        return jsonify({"message": "Prepare OK"}), 200
     except Exception as e:
-        if mysql_success:
-            mysql_conn.rollback()
-
         log_col.update_one(
             {"transaction_id": txn_id},
-            {"$set": {
-                "phase": "prepare",
-                "mysql": "ok" if mysql_success else "fail",
-                "mongodb": "ok" if mongo_success else "fail",
-                "status": "prepare_failed",
-                "error": str(e)
-            }}
+            {"$set": {"mysql": "fail"}}
         )
-        return jsonify({"transaction_id": txn_id, "status": "prepare_failed", "error": str(e)}), 500
-
-
+        return jsonify({"message": f"MySQL prepare failed: {str(e)}"}), 500
 
 @app.route("/commit", methods=["POST"])
 def commit():
@@ -202,9 +136,9 @@ def commit():
             # 2. 插入到正式 orders 表
             for row in rows:
                 cursor.execute("""
-                    INSERT INTO orders (user_id, product_id, amount, create_at)
-                    VALUES (%s, %s, %s, NOW())
-                """, (row[1], row[2], row[3]))  # user_id, product_id, amount
+                    INSERT INTO orders (product_id, amount, create_at)
+                    VALUES (%s, %s, NOW())
+                """, (row[1], row[2]))  # product_id, amount
             print("debug4")
             # 3. 刪除 staging 訂單
             cursor.execute("DELETE FROM products_staging WHERE transaction_id = %s", (txn_id,))
