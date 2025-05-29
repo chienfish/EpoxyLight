@@ -122,32 +122,33 @@ def prepare():
         # --- MySQL 寫入 ---
         # 寫在 products_staging 表
         mysql_conn.begin()
-        with mysql_conn.cursor() as cursor:
-            sql = """
-                INSERT INTO products_staging (user_id, product_id, amount, transaction_id)
-                VALUES (%s, %s, %s, %s)
-            """
-            cursor.execute(sql, (
-                order_data["user_id"],
-                order_data["product_id"],
-                order_data["amount"],
-                txn_id
-            ))
+        for order in order_data:
+            with mysql_conn.cursor() as cursor:
+                sql = """
+                    INSERT INTO products_staging (user_id, product_id, amount, transaction_id)
+                    VALUES (%s, %s, %s, %s)
+                """
+                cursor.execute(sql, (
+                    order["user_id"],
+                    order["product_id"],
+                    order["amount"],
+                    txn_id
+                ))
         mysql_success = True
 
-        # --- MongoDB：模擬扣庫存，不用 transaction ---
+        # MongoDB 寫入
+        for inv in order_data:
+            product = inventory_col.find_one({"_id": inv["product_id"]})
+            if not product or product["stock"] < inv["amount"]:
+                raise Exception(f"Insufficient stock for product {inv['product_id']}")
 
-        result = inventory_col.find_one({"_id": order_data["product_id"]})
-        if not result or result["stock"] < order_data["amount"]:
-            raise Exception("MongoDB: insufficient stock")
-        
-        inventory_staging_col.insert_one({
-            "_id": order_data["product_id"],
-            "name": result["name"],
-            "stock": result["stock"] - order_data["amount"],
-            "transaction_id": txn_id
-        })
-
+            inventory_staging_col.insert_one({
+                "_id": f"{inv['product_id']}_{txn_id}",  # composite key
+                "product_id": inv["product_id"],
+                "name": product["name"],
+                "stock": product["stock"] - inv["amount"],
+                "transaction_id": txn_id
+            })
         mongo_success = True
 
         # --- 寫 log ---
@@ -186,9 +187,14 @@ def prepare():
 def commit():
     data = request.json
     txn_id = data.get("transaction_id")
-
+    print("debug1")
+    log_entry = log_col.find_one({"transaction_id": txn_id})
+    if log_entry["phase"] == "rollback":
+        return jsonify({"error": "Transaction already rolled back"}), 400
+    print("debug2")
     try:
         with mysql_conn.cursor() as cursor:
+            print("debug3")
             # 1. 從 staging 取出該交易
             cursor.execute("SELECT * FROM products_staging WHERE transaction_id = %s", (txn_id,))
             rows = cursor.fetchall()
@@ -199,29 +205,25 @@ def commit():
                     INSERT INTO orders (user_id, product_id, amount, create_at)
                     VALUES (%s, %s, %s, NOW())
                 """, (row[1], row[2], row[3]))  # user_id, product_id, amount
-
+            print("debug4")
             # 3. 刪除 staging 訂單
             cursor.execute("DELETE FROM products_staging WHERE transaction_id = %s", (txn_id,))
 
         # 提交 MySQL 資料庫操作
         mysql_conn.commit()
-
+        print("debug5")
         # mongoDB 更新庫存
         # 查出該交易的 staging 商品
-        staging_product = inventory_staging_col.find_one({"transaction_id": txn_id})
-        if staging_product:
-            product_id = staging_product["_id"]
-            new_stock = staging_product["stock"]
-
-            # 實際更新正式 products 庫存
+        staging_product = inventory_staging_col.find({"transaction_id": txn_id})
+        print(staging_product)
+        for p in staging_product:
             inventory_col.update_one(
-                {"_id": product_id},
-                {"$set": {"stock": new_stock}}
+                {"_id": p["product_id"]},
+                {"$set": {"stock": p["stock"]}}
             )
-
-            # 刪除 staging 商品紀錄
-            inventory_staging_col.delete_one({"transaction_id": txn_id})
-
+        # 刪除 staging 商品紀錄
+        inventory_staging_col.delete_many({"transaction_id": txn_id})
+        print("debug6")
         # 寫 log 狀態為成功
         log_col.update_one(
             {"transaction_id": txn_id},
@@ -258,17 +260,10 @@ def rollback():
     try:
         # 刪除 MySQL 訂單
         with mysql_conn.cursor() as cursor:
-            cursor.execute("DELETE FROM products_staging WHERE transaction_id = %s", (txn_id,))
+            cursor.execute("DELETE FROM orders_staging WHERE transaction_id = %s", (txn_id,))
         mysql_conn.commit()
-
-        # 補回 MongoDB 庫存（加回被扣的量）
-        if "inventory_data" in log_entry:
-            item = log_entry["inventory_data"]["name"]
-            count = log_entry["inventory_data"]["stock"]
-            inventory_col.update_one(
-                {"name": item},
-                {"$inc": {"stock": -count}}  # 回復原本被扣掉的庫存
-            )
+        # 刪除 MongoDB staging 資料
+        inventory_staging_col.delete_many({"transaction_id": txn_id})
 
         # 更新 log
         log_col.update_one(
