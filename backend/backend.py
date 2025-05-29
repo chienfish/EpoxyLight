@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import pymysql
 import pymongo
+from pymongo import UpdateOne
 import uuid
 from datetime import datetime
 
@@ -32,9 +33,9 @@ def init_mysql_schema():
             );
         """)
 
-        # 建立暫存 orders_staging 表
+        # 建立暫存 products_staging 表
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS orders_staging (
+            CREATE TABLE IF NOT EXISTS products_staging (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 user_id INT NOT NULL,
                 product_id VARCHAR(20) NOT NULL,
@@ -58,17 +59,28 @@ mysql_conn = pymysql.connect(
 
 # 初始化 MongoDB 連線
 mongo_client = pymongo.MongoClient("mongodb://localhost:27017/")
-mongo_db = mongo_client["epoxy"]
-inventory_col = mongo_db["inventory"]
+mongo_db = mongo_client["shopdb"]
+inventory_col = mongo_db["products"]
 log_col = mongo_db["transactions_log"]
+inventory_staging_col = mongo_db["products_staging"]
 
 # 還需要MongoDB資料
-inventory_col.insert_many([
-    { "item": "apple", "stock": 10 },
-    { "item": "banana", "stock": 5 },
-    { "item": "coffee", "stock": 8 },
-    { "item": "milk", "stock": 6 }
-])
+inventory_col.delete_many({})
+inventory_staging_col.delete_many({})
+mongo_data=[
+  { "_id": "p001", "name": "iPad Pro", "stock": 50}, 
+  { "_id": "p002", "name": "MacBook Air", "stock": 50 }, 
+  { "_id": "p003", "name": "Apple Watch", "stock": 50 }, 
+  { "_id": "p004", "name": "iPhone 15", "stock": 50 },   
+  { "_id": "p005", "name": "AirPods Pro", "stock": 50 } ,
+]
+
+operations = [
+    UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True)
+    for doc in mongo_data
+]
+
+inventory_col.bulk_write(operations)
 
 # 暫存交易 session
 transactions = {}
@@ -102,18 +114,17 @@ def prepare():
     data = request.json #網頁過來的資料
     txn_id = data.get("transaction_id")
     order_data = data.get("order_data")
-    inventory_data = data.get("inventory_data")
 
     mysql_success = False
     mongo_success = False
 
     try:
         # --- MySQL 寫入 ---
-        # 寫在 orders_staging 表
+        # 寫在 products_staging 表
         mysql_conn.begin()
         with mysql_conn.cursor() as cursor:
             sql = """
-                INSERT INTO orders_staging (user_id, product_id, amount, transaction_id)
+                INSERT INTO products_staging (user_id, product_id, amount, transaction_id)
                 VALUES (%s, %s, %s, %s)
             """
             cursor.execute(sql, (
@@ -125,16 +136,17 @@ def prepare():
         mysql_success = True
 
         # --- MongoDB：模擬扣庫存，不用 transaction ---
-        item = inventory_data["item"]
-        count = inventory_data["count"]
 
-        result = inventory_col.update_one(
-            {"item": item, "stock": {"$gte": abs(count)}},  # 確保有庫存可扣
-            {"$inc": {"stock": count}}
-        )
-
-        if result.modified_count == 0:
+        result = inventory_col.find_one({"_id": order_data["product_id"]})
+        if not result or result["stock"] < order_data["amount"]:
             raise Exception("MongoDB: insufficient stock")
+        
+        inventory_staging_col.insert_one({
+            "_id": order_data["product_id"],
+            "name": result["name"],
+            "stock": result["stock"] - order_data["amount"],
+            "transaction_id": txn_id
+        })
 
         mongo_success = True
 
@@ -146,8 +158,7 @@ def prepare():
                 "mysql": "ok",
                 "mongodb": "ok",
                 "status": "ready",
-                "order_data": order_data,
-                "inventory_data": inventory_data
+                "order_data": order_data
             }}
         )
 
@@ -179,7 +190,7 @@ def commit():
     try:
         with mysql_conn.cursor() as cursor:
             # 1. 從 staging 取出該交易
-            cursor.execute("SELECT * FROM orders_staging WHERE transaction_id = %s", (txn_id,))
+            cursor.execute("SELECT * FROM products_staging WHERE transaction_id = %s", (txn_id,))
             rows = cursor.fetchall()
 
             # 2. 插入到正式 orders 表
@@ -190,10 +201,26 @@ def commit():
                 """, (row[1], row[2], row[3]))  # user_id, product_id, amount
 
             # 3. 刪除 staging 訂單
-            cursor.execute("DELETE FROM orders_staging WHERE transaction_id = %s", (txn_id,))
+            cursor.execute("DELETE FROM products_staging WHERE transaction_id = %s", (txn_id,))
 
         # 提交 MySQL 資料庫操作
         mysql_conn.commit()
+
+        # mongoDB 更新庫存
+        # 查出該交易的 staging 商品
+        staging_product = inventory_staging_col.find_one({"transaction_id": txn_id})
+        if staging_product:
+            product_id = staging_product["_id"]
+            new_stock = staging_product["stock"]
+
+            # 實際更新正式 products 庫存
+            inventory_col.update_one(
+                {"_id": product_id},
+                {"$set": {"stock": new_stock}}
+            )
+
+            # 刪除 staging 商品紀錄
+            inventory_staging_col.delete_one({"transaction_id": txn_id})
 
         # 寫 log 狀態為成功
         log_col.update_one(
@@ -231,15 +258,15 @@ def rollback():
     try:
         # 刪除 MySQL 訂單
         with mysql_conn.cursor() as cursor:
-            cursor.execute("DELETE FROM orders_staging WHERE transaction_id = %s", (txn_id,))
+            cursor.execute("DELETE FROM products_staging WHERE transaction_id = %s", (txn_id,))
         mysql_conn.commit()
 
         # 補回 MongoDB 庫存（加回被扣的量）
         if "inventory_data" in log_entry:
-            item = log_entry["inventory_data"]["item"]
-            count = log_entry["inventory_data"]["count"]
+            item = log_entry["inventory_data"]["name"]
+            count = log_entry["inventory_data"]["stock"]
             inventory_col.update_one(
-                {"item": item},
+                {"name": item},
                 {"$inc": {"stock": -count}}  # 回復原本被扣掉的庫存
             )
 
