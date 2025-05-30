@@ -5,8 +5,6 @@ import CreatePage from "./pages/CreatePage"
 import StatusPage from "./pages/StatusPage"
 import StatusDetailPage from "./pages/StatusDetailPage"
 import HistoryPage from "./pages/HistoryPage"
-import HistoryDetailPage from "./pages/HistoryDetailPage"
-
 
 function App() {
   return (
@@ -40,12 +38,6 @@ function App() {
           path="/history"
           element={
               <HistoryPage />
-          }
-        />
-        <Route
-          path="/history/:id"
-          element={
-              <HistoryDetailPage />
           }
         />
         <Route path="*" element={<NotFound />}></Route>

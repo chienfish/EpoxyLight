@@ -28,15 +28,6 @@ mysql_conn = pymysql.connect(
     autocommit=False
 )
 
-# 暫存交易 session
-transactions = {}
-
-# 狀態分類
-STATUS_MAPPING = {
-    "status": ["pending", "ready"],
-    "history": ["success", "cancelled", "abort"]
-}
-
 @app.route("/begin", methods=["POST"])
 def begin():
     txn_id = f"TXN{uuid.uuid4().hex}" 
@@ -138,6 +129,7 @@ def commit():
 
     try:
         with mysql_conn.cursor() as cursor:
+            # 取得 staging 資料
             cursor.execute(
                 "SELECT product_id, amount FROM orders_staging WHERE transaction_id = %s",
                 (txn_id,)
@@ -145,17 +137,23 @@ def commit():
             staging_orders = cursor.fetchall()
 
             for product_id, amount in staging_orders:
+                # 從 MongoDB 查詢商品價格
                 product = inventory_col.find_one({"_id": product_id})
                 if not product:
                     raise Exception(f"Product {product_id} not found in MongoDB")
                 price = product["price"]
                 total_price = amount * price
 
+                # 寫入正式訂單（新增 transaction_id）
                 cursor.execute(
-                    "INSERT INTO orders (product_id, amount, price, create_at) VALUES (%s, %s, %s, NOW())",
-                    (product_id, amount, total_price)
+                    """
+                    INSERT INTO orders (transaction_id, product_id, amount, price, create_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                    """,
+                    (txn_id, product_id, amount, total_price)
                 )
 
+            # 清空暫存訂單
             cursor.execute(
                 "DELETE FROM orders_staging WHERE transaction_id = %s",
                 (txn_id,)
@@ -242,19 +240,73 @@ def rollback():
 @app.route("/logs", methods=["GET"])
 def get_logs():
     log_type = request.args.get("type")
-    if log_type in STATUS_MAPPING:
-        filtered_logs = [log for log in log_col if log["status"] in STATUS_MAPPING[log_type]]
-    else:
-        filtered_logs = log_col
-    return jsonify(filtered_logs)
 
-@app.route("/items", methods=["GET"]) # 要取create page的商品
+    STATUS_MAPPING = {
+        "status": ["pending", "ready"],
+        "pending": ["pending", "ready"],
+        "history": ["success", "cancelled"]
+    }
+
+    if log_type in STATUS_MAPPING:
+        query = { "status": { "$in": STATUS_MAPPING[log_type] } }
+    else:
+        query = {}
+
+    logs = list(log_col.find(query, {"_id": 0}))
+
+    if log_type == "history":
+        try:
+            txn_ids = [log["transaction_id"] for log in logs]
+            if not txn_ids:
+                return jsonify({ "transactions": [] })
+
+            with mysql_conn.cursor() as cursor:
+                format_str = ",".join(["%s"] * len(txn_ids))
+                query = f"""
+                    SELECT transaction_id, product_id, amount, price, create_at
+                    FROM orders
+                    WHERE transaction_id IN ({format_str})
+                """
+                cursor.execute(query, tuple(txn_ids))
+                rows = cursor.fetchall()
+
+            # 建立 transaction_id -> list of orders
+            txn_map = {}
+            date_map = {}
+            for txn_id, product_id, amount, price, created_at in rows:
+                txn_map.setdefault(txn_id, []).append({
+                    "product_id": product_id,
+                    "amount": amount,
+                    "price": price
+                })
+                # 儲存該 transaction 的時間（只取一筆）
+                if txn_id not in date_map:
+                    date_map[txn_id] = created_at.strftime("%Y-%m-%d")
+
+            for log in logs:
+                txn_id = log["transaction_id"]
+                log["order_details"] = txn_map.get(txn_id, [])
+                log["created_at"] = date_map.get(txn_id)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": str(e)}), 500
+
+    return jsonify({ "transactions": logs })
+
+
+@app.route("/items", methods=["GET"])
 def get_items():
-    # items = inventory_col.distinct("item")
-    # return jsonify({"items": items})
-    return jsonify({
-        "items": ["apple", "banana", "coffee", "milk"]
-    })
+    products = inventory_col.find({}, {"_id": 1, "name": 1, "price": 1})
+    items = []
+    for p in products:
+        items.append({
+            "id": p["_id"],
+            "name": p["name"],
+            "price": p["price"]
+        })
+    return jsonify({"items": items})
 
 @app.route("/transactions", methods=["GET"])
 def get_transactions():
@@ -270,18 +322,59 @@ def get_transactions():
 
 @app.route("/status/<txn_id>", methods=["GET"])
 def get_transaction_detail(txn_id):
-    found = next((log for log in log_col if log["transaction_id"] == txn_id), None)
-    if not found:
+    log = log_col.find_one({"transaction_id": txn_id}, {"_id": 0})
+    if not log:
         return jsonify({"error": "Not found"}), 404
 
+    # 取得 orders_staging 的訂單內容
+    with mysql_conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT product_id, amount FROM orders_staging WHERE transaction_id = %s",
+            (txn_id,)
+        )
+        orders = cursor.fetchall()  # list of (product_id, amount)
+
+    order_data = []
+    inventory_data = []
+    product_ids = [row[0] for row in orders]
+
+    # 從 Mongo 取出所有相關商品
+    mongo_products = {p["_id"]: p for p in inventory_col.find(
+        {"_id": {"$in": product_ids}}, {"_id": 1, "name": 1, "price": 1, "stock": 1}
+    )}
+
+    # 整理 order_data
+    for product_id, amount in orders:
+        product = mongo_products.get(product_id)
+        if product:
+            unit_price = product["price"]
+            order_data.append({
+                "product_id": product_id,
+                "product_name": product["name"],
+                "amount": amount,
+                "unit_price": unit_price,
+                "total_price": unit_price * amount
+            })
+
+    # 整理 inventory_data
+    for product_id in product_ids:
+        product = mongo_products.get(product_id)
+        if product:
+            inventory_data.append({
+                "product_id": product_id,
+                "product_name": product["name"],
+                "price": product["price"],
+                "stock": product["stock"]
+            })
+
     return jsonify({
-        "id": found["transaction_id"],
-        "status": found["status"],
-        "start_time": found["created_at"].replace("T", " "),
-        "mysql_status": found.get("mysql", "ok"),
-        "mongo_status": found.get("mongodb", "ok"),
-        "order_data": found["order_data"],
-        "inventory_data": found["inventory_data"]
+        "transaction_id": log["transaction_id"],
+        "status": log.get("status", ""),
+        "start_time": log.get("start_time", "").isoformat() if isinstance(log.get("start_time"), datetime) else str(log.get("start_time")),
+        "mysql": log.get("mysql", ""),
+        "mongodb": log.get("mongodb", ""),
+        "order_data": order_data,
+        "inventory_data": inventory_data
     })
 
 if __name__ == "__main__":

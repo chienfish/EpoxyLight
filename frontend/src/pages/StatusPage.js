@@ -8,9 +8,9 @@ function StatusPage() {
     const navigate = useNavigate();
 
     useEffect(() => {
-        fetch("/logs?type=status")
+        fetch("/logs?type=pending") // 只抓 status = pending 或 ready 的交易
             .then(res => res.json())
-            .then(data => setTransactions(data || []));
+            .then(data => setTransactions(data.transactions || []));
     }, []);
 
     const handleCommit = async (txnId) => {
@@ -51,7 +51,7 @@ function StatusPage() {
                                 </tr>
                                 <tr>
                                     <td>開始時間</td>
-                                    <td>{txn.created_at?.replace("T", " ")}</td>
+                                    <td>{new Date(txn.start_time).toLocaleString()}</td>
                                 </tr>
                                 <tr>
                                     <td>詳情</td>
@@ -59,11 +59,45 @@ function StatusPage() {
                                 </tr>
                                 <tr>
                                     <td>送出 commit</td>
-                                    <td><button onClick={() => handleCommit(txn.transaction_id)}>✅</button></td>
+                                    <td>
+                                        <button
+                                        onClick={() => {
+                                            if (txn.status === "ready") {
+                                            if (window.confirm(`確定要對交易 ${txn.transaction_id} 執行 commit 嗎？`)) {
+                                                handleCommit(txn.transaction_id);
+                                            }
+                                            }
+                                        }}
+                                        disabled={txn.status !== "ready"}
+                                        title={txn.status !== "ready" ? "僅 ready 狀態可執行 commit" : ""}
+                                        >
+                                        ✅
+                                        </button>
+                                    </td>
                                 </tr>
                                 <tr>
                                     <td>手動 rollback</td>
-                                    <td><button onClick={() => handleRollback(txn.transaction_id)}>🔁</button></td>
+                                    <td>
+                                        <button
+                                        onClick={() => {
+                                            if (txn.status === "pending" || txn.status === "ready") {
+                                            if (window.confirm(`確定要對交易 ${txn.transaction_id} 執行 rollback 嗎？`)) {
+                                                handleRollback(txn.transaction_id);
+                                            }
+                                            }
+                                        }}
+                                        disabled={txn.status !== "pending" && txn.status !== "ready"}
+                                        title={
+                                            txn.status === "success"
+                                            ? "已成功提交，無法 rollback"
+                                            : txn.status !== "pending" && txn.status !== "ready"
+                                            ? "僅 pending 或 ready 狀態可執行 rollback"
+                                            : ""
+                                        }
+                                        >
+                                        🔁
+                                        </button>
+                                    </td>
                                 </tr>
                             </tbody>
                         </table>

@@ -78,3 +78,46 @@
     cursor: pointer;
 }
 
+.detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.detail-table th,
+.detail-table td {
+  border: 1px solid #ccc;
+  padding: 6px 10px;
+  text-align: center;
+}
+
+.detail-table th {
+  background-color: #f7f7f7;
+  color: #333;
+}
+
+.action-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin-top: 24px;
+}
+
+.commit-btn, .rollback-btn {
+    padding: 10px 20px;
+    font-size: 16px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+}
+
+.commit-btn {
+    background-color: #4CAF50;
+    color: white;
+}
+
+.rollback-btn {
+    background-color: #f44336;
+    color: white;
+}

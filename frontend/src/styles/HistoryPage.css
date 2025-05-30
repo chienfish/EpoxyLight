@@ -66,3 +66,21 @@ button:hover {
   color: #000;
   text-decoration: underline;
 }
+
+.status-success {
+  color: green;
+  font-weight: bold;
+}
+
+.status-cancelled {
+  color: red;
+  font-weight: bold;
+}
+
+.order-detail {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 10px;
+  box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.05);
+}
