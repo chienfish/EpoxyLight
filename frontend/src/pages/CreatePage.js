@@ -87,7 +87,19 @@ function CreatePage() {
                             type="number"
                             value={count}
                             min={1}
-                            onChange={e => setCount(Number(e.target.value))}
+                            max={(() => {
+                                const selected = items.find(i => i.id === itemId);
+                                return selected ? selected.stock : 1;
+                            })()}
+                            onChange={e => {
+                                const selected = items.find(i => i.id === itemId);
+                                const value = Number(e.target.value);
+                                if (selected && value > selected.stock) {
+                                    setCount(selected.stock); // 強制不超過庫存
+                                } else {
+                                    setCount(value);
+                                }
+                            }}
                             disabled={!itemId}
                         />
                     </div>

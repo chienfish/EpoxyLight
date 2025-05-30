@@ -338,13 +338,14 @@ def get_logs():
 
 @app.route("/items", methods=["GET"])
 def get_items():
-    products = inventory_col.find({}, {"_id": 1, "name": 1, "price": 1})
+    products = inventory_col.find({}, {"_id": 1, "name": 1, "price": 1, "stock": 1})
     items = []
     for p in products:
         items.append({
-            "id": p["_id"],
+            "id": str(p["_id"]),
             "name": p["name"],
-            "price": p["price"]
+            "price": p["price"],
+            "stock": p.get("stock", 0)  # 安全 fallback
         })
     return jsonify({"items": items})
 

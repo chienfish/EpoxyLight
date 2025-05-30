@@ -14,27 +14,14 @@ function StatusDetailPage() {
     const [committed, setCommitted] = useState(false);
 
     useEffect(() => {
-        fetch(`/status/${id}`)
-            .then(res => res.json())
-            .then(data => {
-                setDetail(data);
+        const fetchDetail = async () => {
+            const res = await fetch(`/status/${id}`);
+            const data = await res.json();
+            setDetail(data);
+        };
 
-                const mysqlFail = data.mysql === "fail";
-                const mongoFail = data.mongodb === "fail";
-
-                if ((mysqlFail || mongoFail) && !rolledBack) {
-                    fetch("/rollback", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ transaction_id: id }),
-                    }).then(() => {
-                        alert("⚠️ 系統偵測到失敗，自動執行 rollback");
-                        setRolledBack(true);
-                        navigate("/history"); // 自動 rollback 後導向
-                    });
-                }
-            });
-    }, [id, rolledBack, navigate]);
+        fetchDetail();
+    }, [id]);
 
     const handleManualRollback = async () => {
         const confirmed = window.confirm("確定要執行 rollback 嗎？\n這將會取消交易並還原所有資料。");
@@ -48,7 +35,7 @@ function StatusDetailPage() {
 
         alert("🔁 已手動觸發 rollback");
         setRolledBack(true);
-        navigate("/history"); // 導向 history 頁
+        navigate("/history");
     };
 
     const handleCommit = async () => {
@@ -63,7 +50,7 @@ function StatusDetailPage() {
 
         alert("✅ 成功送出 commit");
         setCommitted(true);
-        navigate("/history"); // 導向 history 頁
+        navigate("/history");
     };
 
     if (!detail) return <div className="status-detail"><Bar /><p>Loading...</p></div>;
@@ -91,24 +78,24 @@ function StatusDetailPage() {
                     <b>Order 資料</b>
                     {detail.order_data.length > 0 ? (
                         <table className="detail-table">
-                        <thead>
-                            <tr>
-                            <th>商品</th>
-                            <th>數量</th>
-                            <th>單價</th>
-                            <th>總價</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {detail.order_data.map((item, idx) => (
-                            <tr key={idx}>
-                                <td>{item.product_name}</td>
-                                <td>{item.amount}</td>
-                                <td>${item.unit_price}</td>
-                                <td>${item.total_price}</td>
-                            </tr>
-                            ))}
-                        </tbody>
+                            <thead>
+                                <tr>
+                                    <th>商品</th>
+                                    <th>數量</th>
+                                    <th>單價</th>
+                                    <th>總價</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {detail.order_data.map((item, idx) => (
+                                    <tr key={idx}>
+                                        <td>{item.product_name}</td>
+                                        <td>{item.amount}</td>
+                                        <td>${item.unit_price}</td>
+                                        <td>${item.total_price}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
                         </table>
                     ) : (
                         <p>無訂單資料</p>
@@ -120,22 +107,22 @@ function StatusDetailPage() {
                     <b>Inventory 資料</b>
                     {detail.inventory_data.length > 0 ? (
                         <table className="detail-table">
-                        <thead>
-                            <tr>
-                            <th>商品</th>
-                            <th>價格</th>
-                            <th>庫存</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {detail.inventory_data.map((item, idx) => (
-                            <tr key={idx}>
-                                <td>{item.product_name}</td>
-                                <td>${item.price}</td>
-                                <td>{item.stock}</td>
-                            </tr>
-                            ))}
-                        </tbody>
+                            <thead>
+                                <tr>
+                                    <th>商品</th>
+                                    <th>價格</th>
+                                    <th>庫存</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {detail.inventory_data.map((item, idx) => (
+                                    <tr key={idx}>
+                                        <td>{item.product_name}</td>
+                                        <td>${item.price}</td>
+                                        <td>{item.stock}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
                         </table>
                     ) : (
                         <p>無庫存資料</p>
