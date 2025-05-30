@@ -15,7 +15,7 @@ sql_dbname = "DB_order"
 mongo_client = pymongo.MongoClient("mongodb://localhost:27017/")
 mongo_db = mongo_client["shopdb"]
 inventory_col = mongo_db["products"]
-log_col = mongo_db["transactions_log"]
+log_col = mongo_db["transaction_log"]
 inventory_staging_col = mongo_db["products_staging"]
 
 # mysql 連線
@@ -68,12 +68,7 @@ def prepare():
             break
 
         if product['stock'] >= item['amount']:
-            # 實際減少 products 庫存
-            inventory_col.update_one(
-                {"_id": item['product_id']},
-                {"$inc": {"stock": -item['amount']}}
-            )
-            # 寫入 products_staging
+            # 僅寫入 staging，不扣庫存
             inventory_staging_col.insert_one({
                 "transaction_id": txn_id,
                 "product_id": item['product_id'],
@@ -96,21 +91,30 @@ def prepare():
         return jsonify({"message": "MongoDB prepare failed"}), 400
 
     try:
-        cursor = mysql_conn.cursor()
-        for item in products:
-            cursor.execute(
-                "INSERT INTO orders_staging (transaction_id, product_id, amount) VALUES (%s, %s, %s)",
-                (txn_id, item['product_id'], item['amount'])
-            )
+        with mysql_conn.cursor() as cursor:
+            for item in products:
+                cursor.execute(
+                    "INSERT INTO orders_staging (transaction_id, product_id, amount) VALUES (%s, %s, %s)",
+                    (txn_id, item['product_id'], item['amount'])
+                )
         mysql_conn.commit()
-        cursor.close()
 
         log_col.update_one(
             {"transaction_id": txn_id},
             {"$set": {"mysql": "ok"}}
         )
+
+        # 若兩邊皆 ok，更新 status 為 ready
+        log = log_col.find_one({"transaction_id": txn_id})
+        if log.get("mysql") == "ok" and log.get("mongodb") == "ok":
+            log_col.update_one(
+                {"transaction_id": txn_id},
+                {"$set": {"status": "ready"}}
+            )
+
         return jsonify({"message": "Prepare OK"}), 200
     except Exception as e:
+        mysql_conn.rollback()
         log_col.update_one(
             {"transaction_id": txn_id},
             {"$set": {"mysql": "fail"}}
@@ -119,46 +123,56 @@ def prepare():
 
 @app.route("/commit", methods=["POST"])
 def commit():
-    data = request.json
+    data = request.get_json()
     txn_id = data.get("transaction_id")
-    print("debug1")
+
     log_entry = log_col.find_one({"transaction_id": txn_id})
-    if log_entry["phase"] == "rollback":
+    if not log_entry:
+        return jsonify({"error": "Transaction not found"}), 404
+
+    if log_entry.get("phase") == "rollback":
         return jsonify({"error": "Transaction already rolled back"}), 400
-    print("debug2")
+
+    if log_entry.get("status") != "ready":
+        return jsonify({"error": "Transaction not ready for commit"}), 400
+
     try:
         with mysql_conn.cursor() as cursor:
-            print("debug3")
-            # 1. 從 staging 取出該交易
-            cursor.execute("SELECT * FROM products_staging WHERE transaction_id = %s", (txn_id,))
-            rows = cursor.fetchall()
+            cursor.execute(
+                "SELECT product_id, amount FROM orders_staging WHERE transaction_id = %s",
+                (txn_id,)
+            )
+            staging_orders = cursor.fetchall()
 
-            # 2. 插入到正式 orders 表
-            for row in rows:
-                cursor.execute("""
-                    INSERT INTO orders (product_id, amount, create_at)
-                    VALUES (%s, %s, NOW())
-                """, (row[1], row[2]))  # product_id, amount
-            print("debug4")
-            # 3. 刪除 staging 訂單
-            cursor.execute("DELETE FROM products_staging WHERE transaction_id = %s", (txn_id,))
+            for product_id, amount in staging_orders:
+                product = inventory_col.find_one({"_id": product_id})
+                if not product:
+                    raise Exception(f"Product {product_id} not found in MongoDB")
+                price = product["price"]
+                total_price = amount * price
 
-        # 提交 MySQL 資料庫操作
+                cursor.execute(
+                    "INSERT INTO orders (product_id, amount, price, create_at) VALUES (%s, %s, %s, NOW())",
+                    (product_id, amount, total_price)
+                )
+
+            cursor.execute(
+                "DELETE FROM orders_staging WHERE transaction_id = %s",
+                (txn_id,)
+            )
+
         mysql_conn.commit()
-        print("debug5")
-        # mongoDB 更新庫存
-        # 查出該交易的 staging 商品
-        staging_product = inventory_staging_col.find({"transaction_id": txn_id})
-        print(staging_product)
-        for p in staging_product:
+
+        # 真正扣除庫存
+        staging_products = inventory_staging_col.find({"transaction_id": txn_id})
+        for p in staging_products:
             inventory_col.update_one(
                 {"_id": p["product_id"]},
-                {"$set": {"stock": p["stock"]}}
+                {"$inc": {"stock": p["delta_stock"]}}  # delta_stock 是負數
             )
-        # 刪除 staging 商品紀錄
         inventory_staging_col.delete_many({"transaction_id": txn_id})
-        print("debug6")
-        # 寫 log 狀態為成功
+
+        # 更新 log
         log_col.update_one(
             {"transaction_id": txn_id},
             {"$set": {
@@ -171,16 +185,19 @@ def commit():
 
     except Exception as e:
         mysql_conn.rollback()
-
         log_col.update_one(
             {"transaction_id": txn_id},
             {"$set": {
-                "phase": "commit",
-                "status": "commit_failed",
-                "error": str(e)
+                "phase": "rollback",
+                "status": "cancelled",
+                "rollback_reason": str(e)
             }}
         )
-        return jsonify({"transaction_id": txn_id, "status": "commit_failed", "error": str(e)}), 500
+        return jsonify({
+            "transaction_id": txn_id,
+            "status": "cancelled",
+            "error": str(e)
+        }), 500
 
 @app.route("/rollback", methods=["POST"])
 def rollback():
