@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import Bar from "../components/Bar";
 import "../styles/StatusDetailPage.css";
 import { FaDatabase } from "react-icons/fa6";
@@ -8,6 +8,7 @@ import { FaStore } from "react-icons/fa";
 
 function StatusDetailPage() {
     const { id } = useParams();
+    const navigate = useNavigate();
     const [detail, setDetail] = useState(null);
     const [rolledBack, setRolledBack] = useState(false);
     const [committed, setCommitted] = useState(false);
@@ -29,10 +30,11 @@ function StatusDetailPage() {
                     }).then(() => {
                         alert("⚠️ 系統偵測到失敗，自動執行 rollback");
                         setRolledBack(true);
+                        navigate("/history"); // 自動 rollback 後導向
                     });
                 }
             });
-    }, [id, rolledBack]);
+    }, [id, rolledBack, navigate]);
 
     const handleManualRollback = async () => {
         const confirmed = window.confirm("確定要執行 rollback 嗎？\n這將會取消交易並還原所有資料。");
@@ -46,6 +48,7 @@ function StatusDetailPage() {
 
         alert("🔁 已手動觸發 rollback");
         setRolledBack(true);
+        navigate("/history"); // 導向 history 頁
     };
 
     const handleCommit = async () => {
@@ -60,6 +63,7 @@ function StatusDetailPage() {
 
         alert("✅ 成功送出 commit");
         setCommitted(true);
+        navigate("/history"); // 導向 history 頁
     };
 
     if (!detail) return <div className="status-detail"><Bar /><p>Loading...</p></div>;

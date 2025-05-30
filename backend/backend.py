@@ -202,19 +202,50 @@ def rollback():
     data = request.json
     txn_id = data.get("transaction_id")
 
+    # 查找 log 記錄
     log_entry = log_col.find_one({"transaction_id": txn_id})
     if not log_entry:
         return jsonify({"error": "Transaction not found"}), 404
 
+    if log_entry.get("status") not in ["pending", "ready"]:
+        return jsonify({"error": "Only pending or ready transactions can be rolled back"}), 400
+
     try:
-        # 刪除 MySQL 訂單
         with mysql_conn.cursor() as cursor:
+            # 1. 取得 orders_staging 資料
+            cursor.execute("""
+                SELECT product_id, amount
+                FROM orders_staging
+                WHERE transaction_id = %s
+            """, (txn_id,))
+            staging_orders = cursor.fetchall()
+
+            if not staging_orders:
+                return jsonify({"error": "No staging order found for rollback"}), 400
+
+            # 2. 取得商品價格（從 MongoDB products）
+            product_ids = [row[0] for row in staging_orders]
+            products = inventory_col.find({"_id": {"$in": product_ids}})
+            price_map = {p["_id"]: p.get("price", 0) for p in products}
+
+            # 3. 寫入正式 orders 資料
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for product_id, amount in staging_orders:
+                price = price_map.get(product_id, 0)
+                cursor.execute("""
+                    INSERT INTO orders (transaction_id, product_id, amount, price, create_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (txn_id, product_id, amount, price, now))
+            mysql_conn.commit()
+
+            # 4. 刪除 orders_staging 資料
             cursor.execute("DELETE FROM orders_staging WHERE transaction_id = %s", (txn_id,))
-        mysql_conn.commit()
-        # 刪除 MongoDB staging 資料
+            mysql_conn.commit()
+
+        # 5. 刪除 MongoDB inventory_staging 資料
         inventory_staging_col.delete_many({"transaction_id": txn_id})
 
-        # 更新 log
+        # 6. 更新 log
         log_col.update_one(
             {"transaction_id": txn_id},
             {"$set": {
@@ -226,6 +257,10 @@ def rollback():
         return jsonify({"transaction_id": txn_id, "status": "cancelled"})
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+
+        # 回滾失敗寫入錯誤
         log_col.update_one(
             {"transaction_id": txn_id},
             {"$set": {
@@ -234,7 +269,13 @@ def rollback():
                 "error": str(e)
             }}
         )
-        return jsonify({"transaction_id": txn_id, "status": "rollback_failed", "error": str(e)}), 500
+
+        return jsonify({
+            "transaction_id": txn_id,
+            "status": "rollback_failed",
+            "error": str(e)
+        }), 500
+
 
 
 @app.route("/logs", methods=["GET"])
@@ -295,7 +336,6 @@ def get_logs():
 
     return jsonify({ "transactions": logs })
 
-
 @app.route("/items", methods=["GET"])
 def get_items():
     products = inventory_col.find({}, {"_id": 1, "name": 1, "price": 1})
@@ -307,18 +347,6 @@ def get_items():
             "price": p["price"]
         })
     return jsonify({"items": items})
-
-@app.route("/transactions", methods=["GET"])
-def get_transactions():
-    return jsonify({
-        "transactions": [
-            {
-                "id": "TXN001",
-                "status": "ready",
-                "start_time": "2025/05/15 15:30"
-            }
-        ]
-    })
 
 @app.route("/status/<txn_id>", methods=["GET"])
 def get_transaction_detail(txn_id):
