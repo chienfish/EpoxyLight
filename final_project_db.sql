@@ -27,6 +27,6 @@ INSERT INTO orders (product_id, amount, price, create_at) VALUES
 ('p005', 1, 5000, NOW());   -- AirPods Pro
 
 -- 模擬一筆交易中的 staging 訂單
-INSERT INTO orders_staging (transaction_id, product_id, amount) VALUES
-('tx999', 'p001', 1),
-('tx999', 'p002', 1);
+-- INSERT INTO orders_staging (transaction_id, product_id, amount) VALUES
+-- ('tx999', 'p001', 1),
+-- ('tx999', 'p002', 1);
