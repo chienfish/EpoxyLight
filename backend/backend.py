@@ -95,15 +95,22 @@ def prepare():
             {"$set": {"mysql": "ok"}}
         )
 
-        # 若兩邊皆 ok，更新 status 為 ready
+        # 若兩邊皆 ok，更新 status 與 phase
         log = log_col.find_one({"transaction_id": txn_id})
         if log.get("mysql") == "ok" and log.get("mongodb") == "ok":
             log_col.update_one(
                 {"transaction_id": txn_id},
-                {"$set": {"status": "ready"}}
+                {
+                    "$set": {
+                        "status": "ready",
+                        "phase": "prepare",
+                        "prepare_time": datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+                    }
+                }
             )
 
         return jsonify({"message": "Prepare OK"}), 200
+
     except Exception as e:
         mysql_conn.rollback()
         log_col.update_one(
