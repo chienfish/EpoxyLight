@@ -52,6 +52,22 @@ def prepare():
     products = data['products']
     mongo_ok = True
 
+    # 動態建立 orders_staging 表（如果尚未存在）
+    try:
+        with mysql_conn.cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS orders_staging (
+                    transaction_id VARCHAR(64),
+                    product_id VARCHAR(64),
+                    amount INT,
+                    PRIMARY KEY (transaction_id, product_id)
+                )
+            """)
+        mysql_conn.commit()
+    except Exception as e:
+        return jsonify({"message": f"Failed to create staging table: {str(e)}"}), 500
+
+    # MongoDB prepare
     for item in products:
         product = inventory_col.find_one({"_id": item['product_id']})
         if not product:
@@ -59,7 +75,6 @@ def prepare():
             break
 
         if product['stock'] >= item['amount']:
-            # 僅寫入 staging，不扣庫存
             inventory_staging_col.insert_one({
                 "transaction_id": txn_id,
                 "product_id": item['product_id'],
@@ -81,6 +96,7 @@ def prepare():
         )
         return jsonify({"message": "MongoDB prepare failed"}), 400
 
+    # MySQL prepare
     try:
         with mysql_conn.cursor() as cursor:
             for item in products:
@@ -95,7 +111,6 @@ def prepare():
             {"$set": {"mysql": "ok"}}
         )
 
-        # 若兩邊皆 ok，更新 status 與 phase
         log = log_col.find_one({"transaction_id": txn_id})
         if log.get("mysql") == "ok" and log.get("mongodb") == "ok":
             log_col.update_one(
