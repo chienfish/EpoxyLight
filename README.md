@@ -30,7 +30,7 @@
 - Transaction logging for consistency tracking
 - Support for **MySQL and MongoDB**
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+<p align="right">(<a href="#epoxy-light">back to top</a>)</p>
 
 ---
 
@@ -53,7 +53,7 @@ Transaction Log
 
 The coordinator ensures that both databases follow the same transaction state.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+<p align="right">(<a href="#epoxy-light">back to top</a>)</p>
 
 ---
 
@@ -81,7 +81,7 @@ The system follows a simplified **2PC-style workflow**:
 
 These steps ensure both databases maintain consistent states during transactions.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+<p align="right">(<a href="#epoxy-light">back to top</a>)</p>
 
 ---
 
@@ -107,7 +107,7 @@ Collections used for product inventory:
 
 The transaction log records the status and progress of each transaction.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+<p align="right">(<a href="#epoxy-light">back to top</a>)</p>
 
 ---
 
@@ -121,7 +121,7 @@ The transaction log records the status and progress of each transaction.
 | `/commit` | Finalize the transaction |
 | `/rollback` | Cancel the transaction |
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+<p align="right">(<a href="#epoxy-light">back to top</a>)</p>
 
 ---
 
@@ -136,7 +136,7 @@ The transaction log records the status and progress of each transaction.
 - ![Distributed Systems](https://img.shields.io/badge/Distributed_Systems-Transactions-black?style=for-the-badge)
 - ![Two Phase Commit](https://img.shields.io/badge/2PC-Transaction_Protocol-purple?style=for-the-badge)
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+<p align="right">(<a href="#epoxy-light">back to top</a>)</p>
 
 ---
 
@@ -151,4 +151,4 @@ Proceedings of the VLDB Endowment, 2023.
 
 https://people.eecs.berkeley.edu/~matei/papers/2023/vldb_epoxy.pdf
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+<p align="right">(<a href="#epoxy-light">back to top</a>)</p>
