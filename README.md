@@ -1,10 +1,6 @@
 # Epoxy Light
 
-Epoxy Light is a lightweight **cross-database transaction coordinator** designed to maintain consistency across heterogeneous databases.
-
-The system simulates a simplified **Two-Phase Commit (2PC)** protocol to coordinate transactions between **MySQL** and **MongoDB**, ensuring that operations either succeed together or fail together.
-
-This project is inspired by the Epoxy system proposed in the VLDB paper on cross-database ACID transactions.
+<h4 align="center">Epoxy Light is a lightweight cross-database transaction coordinator designed to maintain consistency across heterogeneous databases.</h4>
 
 <p align="center">
   <a href="#features">Features</a> •
